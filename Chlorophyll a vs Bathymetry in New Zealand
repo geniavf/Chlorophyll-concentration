@@ -1,0 +1,249 @@
+% Loading the bathymetry file
+bathymetry=ncread('ETOPO2v2g_f4.nc','z');
+lon=ncread('ETOPO2v2g_f4.nc','x');
+lat=ncread('ETOPO2v2g_f4.nc','y');
+
+% Extract the necessary local area that we interested in
+% Define the coordinates for the desired area
+lon_range = [160, 180]; % Longitude range (in degrees)
+lat_range = [-60, -40]; % Latitude range (in degrees)
+
+
+% Find indices corresponding to the specified area
+lon_indices = find(lon >= lon_range(1) & lon <= lon_range(2));
+lat_indices = find(lat >= lat_range(1) & lat <= lat_range(2));
+
+
+% Crop the data
+cropped_bathymetry = bathymetry(lon_indices, lat_indices);
+cropped_lon = lon(lon_indices);
+cropped_lat = lat(lat_indices);
+
+% Create a land mask using the zero-depth threshold
+land_mask = cropped_bathymetry >= 0;
+
+% Plot the bathymetry
+figure;
+contourf(lon(lon_indices), lat(lat_indices), cropped_bathymetry', 50, 'LineColor', 'none');
+shading flat;
+colormap(jet);
+colorbar;
+
+hold on;
+
+% Draw land mask as gray polygons
+contourf(lon(lon_indices), lat(lat_indices), land_mask', [0.5, 1.5], 'LineColor', 'k', 'FaceColor', [0.8, 0.8, 0.8]);
+
+
+% Assuming bathymetry is a 2D array representing the depth data
+% Find indices where bathymetry is equal to 0 (indicating land)
+
+%% CHLOROPHYLL DATASET
+% Loading the chlorophyll-a file
+    ncFile='AQUA_MODIS.20210101_20211231.L3m.YR.CHL.chlor_a.9km.nc';
+    info = ncinfo(ncFile);
+    variableNames = {info.Variables.Name};
+    ncdisp('AQUA_MODIS.20210101_20211231.L3m.YR.CHL.chlor_a.9km.nc');
+    % It says that the data has 4 variable names --> chlor_a; lat; lon;
+    % palette
+    % chlor_a
+    % Size: 4320x2160
+    % Dimensions: lon,lat
+    % 'rhos_645,rhos_555,rhos_469'
+chlor_a=ncread('AQUA_MODIS.20210101_20211231.L3m.YR.CHL.chlor_a.9km.nc','chlor_a');
+lon2=ncread('AQUA_MODIS.20210101_20211231.L3m.YR.CHL.chlor_a.9km.nc','lon');
+lat2=ncread('AQUA_MODIS.20210101_20211231.L3m.YR.CHL.chlor_a.9km.nc','lat');
+
+lon_range_chla = [160, 180]; % Longitude range (in degrees)
+lat_range_chla = [-60, -40]; % Latitude range (in degrees)
+
+% Extract the necessary local area that we interested in
+% Define the coordinates for the desired area
+lon2_indices = find(lon2 >= lon_range_chla(1) & lon2 <= lon_range_chla(2));
+lat2_indices = find(lat2 >= lat_range_chla(1) & lat2 <= lat_range_chla(2));
+
+
+% Crop the data
+cropped_chla = chlor_a(lon2_indices, lat2_indices);
+cropped_lon2 = lon2(lon2_indices);
+cropped_lat2 = lat2(lat2_indices);
+
+
+% Use Bilinear interpolation
+
+% Use the interp2 --> for the 2-D dimension/grid
+% Perform bilinear interpolation to transform chlorophyll data onto the bathymetry grid
+% The interpolated value at a query point is based on linear interpolation of the values at neighboring grid points in each respective dimension. 
+% This is the default interpolation method. And it's simple and efficient
+% for the non-complex dataset.
+
+% Method 1: interpolated_chla = interp2(cropped_lon2, cropped_lat2, cropped_chla, target_lon, target_lat, 'linear');
+% It changes the dimension from 2D become 1D array 601x1
+
+
+% OR interpolate NaN values based on neighboring values
+% cropped_chla_cleaned = fillmissing(cropped_chla, 'linear');
+% Define regular grid for interpolation (matching bathymetry grid)
+
+flipped_lat2 = flipud(cropped_lat2);
+
+[X_chla, Y_chla] = meshgrid(cropped_lon, cropped_lat);
+[X_bathy, Y_bathy] = meshgrid(cropped_lon2, flipped_lat2);
+
+% Interpolate chlorophyll data to match bathymetry grid
+interpolated_chla = interp2(X_bathy, Y_bathy, cropped_chla, X_chla, Y_chla, 'linear');
+
+% Check for NaN values in interpolated_chla
+% Create a mask for non-NaN values
+nonNaNMask = ~isnan(interpolated_chla) & ~isnan(cropped_bathymetry);
+
+% Extract non-NaN values using the mask
+cropped_chla_noNaN = interpolated_chla(nonNaNMask);
+cropped_bathymetry_noNaN = cropped_bathymetry(nonNaNMask);
+
+% Verify dimensions of interpolated_chla
+disp(['Dimensions of interpolated_chla: ', num2str(size(interpolated_chla))]);
+
+%%
+% Define the desired color map and color steps
+numColors = 101; % Number of color steps (including 0 and 1)
+customColormap = jet(numColors);
+
+% Plot the interpolated chlorophyll data for verification
+figure;
+contourf(cropped_lon, cropped_lat, interpolated_chla', 50, 'LineColor', 'none');
+shading flat;
+colormap(customColormap);
+colorbar;
+clim([0, 1]); % Set color scale limits from 0 to 1
+xlabel('Longitude');
+ylabel('Latitude');
+title('Interpolated Chlorophyll-a Concentration');
+
+% Q8: Produce a scatterplot from the paired values of seafloor depth and
+% surface ocean chlorophyll concentration
+
+% The result is ugly and not representative:
+% Flatten the 2D arrays into vectors
+bathymetry_vector = cropped_bathymetry(:);
+chla_vector = interpolated_chla(:);
+concatenated_vector=[chla_vector bathymetry_vector];
+nonan=concatenated_vector(sum(isnan(concatenated_vector),2)==0,:);
+
+
+% Create a scatter plot
+figure;
+scatter(nonan(:,2), nonan(:,1),10,'filled');
+xlabel('Seafloor Depth');
+ylabel('Surface Ocean Chlorophyll Concentration');
+title('Scatter Plot: Seafloor Depth vs Chlorophyll Concentration');
+
+log_bathy=log10(nonan(:,2));
+log_chlor=log10(nonan(:,1));
+
+figure;
+scatter(nonan(:,2), log_chlor,10,'filled');
+xlabel('Seafloor Depth');
+ylabel('Surface Ocean Chlorophyll Concentration');
+title('Scatter Plot: Seafloor Depth vs Chlorophyll Concentration');
+
+% In the cropped_bathymetry data, there are values that are 0 and positive, is it necessary to not include this value?
+% Will it influence the result of the scatter?
+% I think so, because we are not focused in the land, the main focus is the
+% ocean
+
+% Second method since it's overplotted (601x601 for each): 
+% Randomly select 3000 data points for plotting
+%  But we will lose a lot of data 
+random_indices = randperm(length(bathymetry_vector), 3000);
+scatter(bathymetry_vector(random_indices), chla_vector(random_indices), '.', 'MarkerEdgeColor', 'r');
+
+% Based on the result --> non linear method (environmental data usually
+% deal with non linear, so maybe it's correct)
+% Because, even if we use the random indices for the scatter plot, it's
+% still showing non-linear 
+
+concatenated_data = [cropped_bathymetry(:), interpolated_chla(:)]; % with isnan is not working, it shows value of 0
+% We can see in here that the result for the interpolated chla is showing a
+% lot of NaN data in some bathymetry --> I think we should not include
+% this?
+
+index_chla=isnan(interpolated_chla);
+bathy2=cropped_bathymetry(index_chla);
+chla2=interpolated_chla(index_chla);
+% the chla2 is NaN the whole rows and columns
+
+% Calculate Spearman correlation coefficient
+spearman_corr = corr(concatenated_data, 'type', 'Spearman');
+% It includes NaN value, hence its result is showing:
+% 1	NaN
+% NaN NaN
+
+% Calculate Spearman correlation coefficient considering NaN values
+spearman_corr2 = corr(bathymetry_vector,chla_vector, 'type', 'Spearman', 'rows', 'pairwise');
+% Value is: -0.381
+% seafloor depth increases, chlorophyll concentration tends to decrease
+% Look for a research paper about it
+
+% So, now try to remove the NaN value from chlorophyll-a while also
+% removing the respected bathymetry (that corresponds to each Chl-a NaN
+% value)
+
+% Question 9
+depth = cropped_bathymetry(:); % Reshape the 2D array to a vector
+% Or use the bathymetry_vector
+chl_a = interpolated_chla(:);
+
+% Perform linear regression
+mdl = fitlm(depth, chl_a);
+% Number of observations: 339221, Error degrees of freedom: 339219
+% Root Mean Squared Error: 0.254
+% R-squared: 0.0362,  Adjusted R-Squared: 0.0362
+% F-statistic vs. constant model: 1.27e+04, p-value = 0
+
+
+% Display the regression results
+disp(mdl);
+
+% Plot the regression line
+figure;
+scatter(depth, chl_a, '.', 'MarkerEdgeColor', 'r');
+hold on;
+plot(depth, predict(mdl), '-b', 'LineWidth', 2);
+xlabel('Seafloor Depth');
+ylabel('Surface Ocean Chlorophyll Concentration');
+title('Linear Regression: Seafloor Depth vs Chlorophyll Concentration');
+legend('Data', 'Regression Line');
+
+% Result is not representative --> The regression line is in between the
+% value of 0-1 Chl-a concentration
+% Maybe we should remove the NaN value so that the plot will be more
+% representative and 
+
+depth_prediction = 8000;
+predicted_chl_a = predict(mdl, depth_prediction);
+disp(['Predicted Chlorophyll Concentration at 8 km Depth: ', num2str(predicted_chl_a)]);
+% 0.032024
+% Ask if we should use the average instead since the data is too large and
+% it's difficult to interpret the result
+% Since R-square value is so small --> Not high trust
+
+% Calculate the propagated uncertainty
+% Use the MonteCarlo
+c_depth = 100; 
+depth_uncertainty = 5; % Standard deviation of seafloor depth uncertainty in meters
+num_samples = 10000; % Let's try also smaller number
+
+% Perform Monte Carlo simulation
+b_samples = normrnd(c_depth, depth_uncertainty, [1, num_samples]); % Random samples of seafloor depth
+c_samples = 1800 * (1 ./ b_samples).^1.5; % Calculate corresponding chlorophyll concentrations
+
+% Analyze the results (e.g., calculate mean, standard deviation, etc.)
+mean_c = mean(c_samples);
+std_c = std(c_samples);
+
+% Visualize the distribution (optional)
+histogram(c_samples, 'Normalization', 'probability');
+xlabel('Chlorophyll Concentration');
+ylabel('Probability Density');
+title('Monte Carlo Simulation Results');
